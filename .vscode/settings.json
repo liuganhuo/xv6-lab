@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "stat.h": "c",
+        "user.h": "c",
+        "*.tcc": "c",
+        "bitset": "c",
+        "string": "c",
+        "unordered_map": "c",
+        "unordered_set": "c",
+        "functional": "c",
+        "string_view": "c",
+        "ratio": "c",
+        "streambuf": "c",
+        "fcntl.h": "c",
+        "param.h": "c"
+    },
+    "ros.distro": "iron"
+}
