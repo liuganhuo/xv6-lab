@@ -1,0 +1,6 @@
+{
+    "ros.distro": "iron",
+    "files.associations": {
+        "riscv.h": "c"
+    }
+}

@@ -86,7 +86,7 @@ pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
-    panic("walk");
+    return 0;
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -136,9 +136,8 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
-// physical addresses starting at pa.
-// va and size MUST be page-aligned.
-// Returns 0 on success, -1 if walk() couldn't
+// physical addresses starting at pa. va and size might not
+// be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
 int
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
@@ -170,6 +169,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   }
   return 0;
 }
+
 
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
@@ -315,20 +315,26 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
+  //  my solution
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    inc_refcount(pa);
+
+    if (flags & PTE_W || flags & PTE_COW) {
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = (*pte & ~PTE_W) | PTE_COW;
+    }
+
+
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -358,18 +364,41 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0, pa0, flags;
   pte_t *pte;
+  void *new_pa;
 
-  while(len > 0){
+  while(len > 0) {
     va0 = PGROUNDDOWN(dstva);
-    if(va0 >= MAXVA)
+    /* same logic as `cow_pf_handler()` */
+    if ((pte = walk(pagetable, va0, 0)) == 0) {
       return -1;
-    pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
-      return -1;
+    }
     pa0 = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    if (flags & PTE_COW && (flags & PTE_W) == 0) {
+      if (dec_refcount_if_shared(pa0)) {
+        *pte |= PTE_W;
+        *pte &= ~PTE_COW;
+      } else {
+        if ((new_pa = kalloc()) == 0) {
+          panic("copyout: No space");
+        }
+
+        memmove(new_pa, (void *)pa0, PGSIZE);
+
+        uvmunmap(pagetable, va0, 1, 0);
+        mappages(pagetable, va0, PGSIZE, (uint64)new_pa,
+                 (flags & ~PTE_COW) | PTE_W);
+
+        pa0 = (uint64)new_pa;
+      }
+    } else if ((flags & PTE_W) == 0) {
+      /* The page is originally unwriteable rather than due to CoW. */
+      return -1;
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

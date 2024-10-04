@@ -187,3 +187,7 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+// cow.c
+void            inc_refcount(uint64 pa);
+int             dec_refcount_if_shared(uint64 pa);
