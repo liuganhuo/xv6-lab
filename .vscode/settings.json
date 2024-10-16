@@ -1,0 +1,7 @@
+{
+    "ros.distro": "iron",
+    "files.associations": {
+        "mutex": "c",
+        "thread": "c"
+    }
+}
